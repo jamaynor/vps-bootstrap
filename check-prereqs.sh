@@ -114,10 +114,10 @@ prompt_menu() {
     printf '  1) Install VPS services\n'
     if [[ $MISSING_COUNT -gt 0 ]]; then
         printf '  2) Install missing prerequisites\n'
-        printf '  3) Quit\n\n'
+        printf '  3) Exit\n\n'
         printf 'Select [1-3] (default: 1): '
     else
-        printf '  2) Quit\n\n'
+        printf '  2) Exit\n\n'
         printf 'Select [1-2] (default: 1): '
     fi
 
@@ -141,7 +141,7 @@ prompt_menu() {
                 printf '[vps-bootstrap] Installing missing prerequisites...\n'
                 launch_bootstrap --prereqs
                 ;;
-            3|quit|q|Q|n|N|no|NO|exit)
+            3|exit|Exit|quit|Quit|q|Q|n|N|no|NO)
                 printf '[vps-bootstrap] Exiting.\n'
                 exit 0
                 ;;
@@ -156,7 +156,7 @@ prompt_menu() {
                 printf '[vps-bootstrap] Proceeding with VPS services installation...\n'
                 launch_bootstrap
                 ;;
-            2|quit|q|Q|n|N|no|NO|exit)
+            2|exit|Exit|quit|Quit|q|Q|n|N|no|NO)
                 printf '[vps-bootstrap] Exiting.\n'
                 exit 0
                 ;;

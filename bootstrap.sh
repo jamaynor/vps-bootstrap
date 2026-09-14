@@ -188,65 +188,137 @@ ensure_gh() {
     fi
 }
 
+ensure_node_and_npm() {
+    local need_node=false
+    if ! command -v node >/dev/null 2>&1 || ! command -v npm >/dev/null 2>&1; then
+        need_node=true
+    else
+        local major_ver
+        major_ver="$(node -v 2>/dev/null | tr -d 'v' | cut -d. -f1 || echo 0)"
+        if [[ "$major_ver" =~ ^[0-9]+$ ]] && [[ "$major_ver" -lt 20 ]]; then
+            need_node=true
+        fi
+    fi
+    if [[ "$need_node" == true ]]; then
+        log "installing Node.js 22 LTS and npm via NodeSource"
+        if command -v curl >/dev/null 2>&1; then
+            curl -fsSL https://deb.nodesource.com/setup_22.x | bash - 2>/dev/null || true
+            DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs 2>/dev/null || true
+        fi
+        if ! command -v node >/dev/null 2>&1; then
+            DEBIAN_FRONTEND=noninteractive apt-get install -y nodejs npm 2>/dev/null || true
+        fi
+    fi
+}
+
 ensure_claude() {
-    if command -v claude >/dev/null 2>&1; then
+    if command -v claude >/dev/null 2>&1 || [[ -x /usr/local/bin/claude || -x /usr/bin/claude ]]; then
         return 0
     fi
     log "installing Claude Code"
-    if curl -fsSL https://claude.ai/install.sh | env CLAUDE_INSTALL_ALLOW_SUDO=1 bash 2>/dev/null; then
-        if [[ -f /root/.local/bin/claude ]]; then
-            cp -f /root/.local/bin/claude /usr/local/bin/claude 2>/dev/null || true
-            chmod 755 /usr/local/bin/claude 2>/dev/null || true
+    local installed=false
+    if command -v npm >/dev/null 2>&1; then
+        if npm install -g --no-audit --no-fund @anthropic-ai/claude-code; then
+            installed=true
         fi
     fi
-    if ! command -v claude >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
-        npm install -g --no-audit --no-fund @anthropic-ai/claude-code 2>/dev/null || true
+    if [[ "$installed" == false ]] && command -v curl >/dev/null 2>&1; then
+        if curl -fsSL https://claude.ai/install.sh | env CLAUDE_INSTALL_ALLOW_SUDO=1 bash; then
+            installed=true
+        fi
+    fi
+    if [[ -f /root/.local/bin/claude ]]; then
+        cp -f /root/.local/bin/claude /usr/local/bin/claude 2>/dev/null || true
+    fi
+    if [[ -x /usr/local/bin/claude ]]; then
+        chmod 755 /usr/local/bin/claude 2>/dev/null || true
+        ln -sf /usr/local/bin/claude /usr/bin/claude 2>/dev/null || true
+    fi
+    if command -v claude >/dev/null 2>&1 || [[ -x /usr/local/bin/claude || -x /usr/bin/claude ]]; then
+        log "Claude Code installed successfully"
+    else
+        log "WARNING: Claude Code installation failed; check node/npm or install manually"
     fi
 }
 
 ensure_codex() {
-    if command -v codex >/dev/null 2>&1; then
+    if command -v codex >/dev/null 2>&1 || [[ -x /usr/local/bin/codex || -x /usr/bin/codex ]]; then
         return 0
     fi
+    log "installing OpenAI Codex CLI"
     if command -v npm >/dev/null 2>&1; then
-        log "installing OpenAI Codex CLI"
-        npm install -g --no-audit --no-fund @openai/codex 2>/dev/null || true
+        npm install -g --no-audit --no-fund @openai/codex || true
+    fi
+    if [[ -f /root/.local/bin/codex ]]; then
+        cp -f /root/.local/bin/codex /usr/local/bin/codex 2>/dev/null || true
+    fi
+    if [[ -x /usr/local/bin/codex ]]; then
+        chmod 755 /usr/local/bin/codex 2>/dev/null || true
+        ln -sf /usr/local/bin/codex /usr/bin/codex 2>/dev/null || true
+    fi
+    if command -v codex >/dev/null 2>&1 || [[ -x /usr/local/bin/codex || -x /usr/bin/codex ]]; then
+        log "OpenAI Codex CLI installed successfully"
+    else
+        log "WARNING: OpenAI Codex CLI installation failed"
     fi
 }
 
 ensure_copilot() {
-    if command -v copilot >/dev/null 2>&1; then
+    if command -v copilot >/dev/null 2>&1 || [[ -x /usr/local/bin/copilot || -x /usr/bin/copilot ]]; then
         return 0
     fi
+    log "installing GitHub Copilot CLI"
     if command -v npm >/dev/null 2>&1; then
-        log "installing GitHub Copilot CLI"
-        npm install -g --no-audit --no-fund @github/copilot 2>/dev/null || true
+        npm install -g --no-audit --no-fund @github/copilot || true
+    fi
+    if [[ -f /root/.local/bin/copilot ]]; then
+        cp -f /root/.local/bin/copilot /usr/local/bin/copilot 2>/dev/null || true
+    fi
+    if [[ -x /usr/local/bin/copilot ]]; then
+        chmod 755 /usr/local/bin/copilot 2>/dev/null || true
+        ln -sf /usr/local/bin/copilot /usr/bin/copilot 2>/dev/null || true
+    fi
+    if command -v copilot >/dev/null 2>&1 || [[ -x /usr/local/bin/copilot || -x /usr/bin/copilot ]]; then
+        log "GitHub Copilot CLI installed successfully"
+    else
+        log "WARNING: GitHub Copilot CLI installation failed"
     fi
 }
 
 ensure_typescript() {
-    if command -v tsc >/dev/null 2>&1; then
+    if command -v tsc >/dev/null 2>&1 || [[ -x /usr/local/bin/tsc || -x /usr/bin/tsc ]]; then
         return 0
     fi
     if command -v npm >/dev/null 2>&1; then
         log "installing TypeScript"
-        npm install -g --no-audit --no-fund typescript 2>/dev/null || true
+        npm install -g --no-audit --no-fund typescript || true
+    fi
+    if [[ -x /usr/local/bin/tsc ]]; then
+        chmod 755 /usr/local/bin/tsc 2>/dev/null || true
+        ln -sf /usr/local/bin/tsc /usr/bin/tsc 2>/dev/null || true
     fi
 }
 
 ensure_antigravity_cli() {
-    if command -v agy >/dev/null 2>&1 || command -v antigravity >/dev/null 2>&1; then
+    if command -v agy >/dev/null 2>&1 || command -v antigravity >/dev/null 2>&1 || [[ -x /usr/local/bin/agy || -x /usr/bin/agy ]]; then
         return 0
     fi
     if command -v curl >/dev/null 2>&1; then
         log "installing Antigravity CLI"
-        if curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin 2>/dev/null; then
-            chmod 755 /usr/local/bin/agy 2>/dev/null || true
-        fi
+        curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin || true
         if [[ ! -x /usr/local/bin/agy && -x /root/.local/bin/agy ]]; then
             cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null || true
-            chmod 755 /usr/local/bin/agy 2>/dev/null || true
         fi
+        if [[ -x /usr/local/bin/agy ]]; then
+            chmod 755 /usr/local/bin/agy 2>/dev/null || true
+            ln -sf /usr/local/bin/agy /usr/bin/agy 2>/dev/null || true
+            ln -sf /usr/local/bin/agy /usr/bin/antigravity 2>/dev/null || true
+        fi
+    fi
+    if command -v agy >/dev/null 2>&1 || [[ -x /usr/local/bin/agy || -x /usr/bin/agy ]]; then
+        log "Antigravity CLI installed successfully"
+    else
+        log "WARNING: Antigravity CLI installation failed"
     fi
 }
 
@@ -360,6 +432,7 @@ install_shared_prerequisites() {
         DEBIAN_FRONTEND=noninteractive apt-get install -y "${missing_pkgs[@]}"
     fi
 
+    ensure_node_and_npm
     ensure_caddy
     ensure_gh
     ensure_typescript
@@ -472,18 +545,13 @@ main() {
         exit 0
     fi
 
+    log "checking and installing shared prerequisites"
+    install_shared_prerequisites
+    display_prerequisites_status
+
     if [[ "$prereqs_only" == true ]]; then
-        log "checking and installing shared prerequisites"
-        install_shared_prerequisites
-        display_prerequisites_status
         log "shared prerequisites installed successfully"
         exit 0
-    fi
-
-    log "checking base packages"
-    if ! command -v git >/dev/null || ! dpkg-query -W -f='${Status}' ca-certificates 2>/dev/null | grep -qx 'install ok installed'; then
-        apt-get update
-        DEBIAN_FRONTEND=noninteractive apt-get install -y git ca-certificates
     fi
 
     install_credential

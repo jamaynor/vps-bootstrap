@@ -184,9 +184,19 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                                   .replace('/etc/os-release', str(os_release)))
         # Stub only package status; real Git, filesystem, credential prompt, lock,
         # clean environment and exec handoff run in the relocated fixture.
-        command = (f'source {fixture_script}\nREPOSITORY={upstream}\n'
-                   'dpkg-query() { printf "install ok installed\\n"; }\n'
-                   'apt-get() { exit 97; }\nmain')
+        stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
+                'apt-get() { exit 97; }\n'
+                'node() { printf "v22.0.0\\n"; }\n'
+                'npm() { :; }\n'
+                'curl() { :; }\n'
+                'caddy() { :; }\n'
+                'gh() { :; }\n'
+                'tsc() { :; }\n'
+                'claude() { :; }\n'
+                'codex() { :; }\n'
+                'copilot() { :; }\n'
+                'agy() { :; }\n')
+        command = f'source {fixture_script}\nREPOSITORY={upstream}\n{stub}main'
         pid, fd = pty.fork()
         if pid == 0:
             os.execv('/bin/bash', ['bash', '-c', command])
@@ -252,7 +262,18 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         host_root.mkdir()
         os_release = self.root / 'os-release'
         os_release.write_text('ID=ubuntu\n')
-        stub = 'dpkg-query() { printf "install ok installed\\n"; }\napt-get() { exit 97; }\n'
+        stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
+                'apt-get() { exit 97; }\n'
+                'node() { printf "v22.0.0\\n"; }\n'
+                'npm() { :; }\n'
+                'curl() { :; }\n'
+                'caddy() { :; }\n'
+                'gh() { :; }\n'
+                'tsc() { :; }\n'
+                'claude() { :; }\n'
+                'codex() { :; }\n'
+                'copilot() { :; }\n'
+                'agy() { :; }\n')
         content = SCRIPT.read_text().replace('/root', str(host_root)) \
                                     .replace('/srv', str(self.root / 'srv')) \
                                     .replace('/etc/os-release', str(os_release)) \
@@ -316,8 +337,9 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                                     .replace('/etc/os-release', str(os_release))
         stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
                 'apt-get() { exit 97; }\n'
-                'curl() { :; }\n'
+                'node() { printf "v22.0.0\\n"; }\n'
                 'npm() { :; }\n'
+                'curl() { :; }\n'
                 'claude() { :; }\n'
                 'codex() { :; }\n'
                 'copilot() { :; }\n'
@@ -366,7 +388,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                         break
                     output += chunk
                     if b'Select [' in output and not sent:
-                        if b'3) Quit' in output:
+                        if b'3) Exit' in output:
                             os.write(fd, b'3\n')
                         else:
                             os.write(fd, b'2\n')
