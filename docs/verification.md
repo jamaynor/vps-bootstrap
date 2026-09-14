@@ -2,7 +2,8 @@
 
 Local automated validation covers synthetic credential entry through a real
 PTY, retained credentials, helper protocol scope, filesystem protections,
-noninteractive refusal, and real Git clone/rerun/local-edit preservation.
+noninteractive refusal, shared prerequisites installation options, and real
+Git clone/rerun/local-edit preservation.
 Run `bash -n bootstrap.sh` and `python3 -m unittest discover -s test -v`.
 No live host provisioning or real credential access is part of those tests.
 
@@ -11,8 +12,9 @@ No live host provisioning or real credential access is part of those tests.
 Use a disposable Ubuntu VPS with working networking and an operator-owned SSH
 session. Do not run this flow through an agent-connected terminal.
 
-1. Run the entry command from the README using an account with sudo authority.
-   On bare Ubuntu, curl, Git, and CA certificates should be installed as needed.
+1. Run the entry command from the README using an account with sudo authority
+   (or pass `--prereqs` to install shared host prerequisites only).
+   On bare Ubuntu, base packages and shared prerequisites are installed as needed.
 2. At the masked prompt, enter a PAT authorized to read the private installer
    repository. Typed characters must not appear on screen.
 3. Confirm that the service-selection menu appears. Stop at the menu if this is

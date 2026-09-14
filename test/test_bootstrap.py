@@ -292,5 +292,39 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         self.assertEqual(checkout.stat().st_mode & 0o777, 0o755)
         self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o644)
 
+    def test_help_flag_displays_usage(self):
+        for flag in ['-h', '--help']:
+            with self.subTest(flag=flag):
+                result = subprocess.run(['bash', str(SCRIPT), flag], text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn('Usage: bootstrap.sh', result.stdout)
+                self.assertIn('--prereqs', result.stdout)
+
+    def test_rejects_unknown_argument(self):
+        result = subprocess.run(['bash', str(SCRIPT), '--unknown-flag'], text=True, capture_output=True)
+        self.assertNotEqual(result.returncode, 0)
+        self.assertIn('unknown argument', result.stderr)
+
+    def test_prereqs_only_flag_installs_and_exits(self):
+        host_root = self.root / 'root'
+        host_root.mkdir()
+        os_release = self.root / 'os-release'
+        os_release.write_text('ID=ubuntu\n')
+        fixture_script = self.root / 'fixture-bootstrap.sh'
+        content = SCRIPT.read_text().replace('/root', str(host_root)) \
+                                    .replace('/etc/os-release', str(os_release))
+        stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
+                'apt-get() { exit 97; }\n'
+                'agy() { :; }\n')
+        fixture_script.write_text(stub + content)
+
+        for flag in ['--prereqs', '--shared-prereqs', '--prerequisites']:
+            with self.subTest(flag=flag):
+                result = subprocess.run(['bash', str(fixture_script), flag],
+                                        stdin=subprocess.DEVNULL, text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0, result.stderr)
+                self.assertIn('shared prerequisites installed successfully', result.stdout)
+                self.assertFalse((host_root / '.secrets').exists())
+
 if __name__ == '__main__':
     unittest.main()
