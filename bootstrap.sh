@@ -2,7 +2,7 @@
 # Secrets are read only from the operator's controlling terminal.
 set +x +v
 set -Eeuo pipefail
-umask 077
+umask 022
 export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 SECRET_DIR=/root/.secrets
 SECRET_FILE=${SECRET_DIR}/gh_pat.txt
@@ -36,6 +36,7 @@ prompt_pat() {
 }
 
 install_credential() {
+    umask 077
     [[ ! -L "$SECRET_DIR" ]] || fail "secret directory must not be a symlink"
     if [[ -e "$SECRET_DIR" ]]; then
         [[ -d "$SECRET_DIR" && $(stat -c '%u:%a' "$SECRET_DIR") == 0:700 ]] || fail "secret directory must be root-owned and mode 0700"
@@ -125,14 +126,15 @@ jamaynor/vps-services.
 
 Options:
   --prereqs, --shared-prereqs, --prerequisites
-      Install shared prerequisites only and exit without prompting for
-      GitHub credentials or launching service selection.
+      Install shared prerequisites only, print the checklist, and exit.
+  --check, --status
+      Display the status checklist for all shared prerequisites and exit.
   -h, --help
       Show this help message.
 
-When run without options, shared prerequisites are installed first to
-prepare the host, followed by GitHub credential setup, private repository
-checkout, and the interactive service installer menu.
+When run without options, shared prerequisites are checked and installed,
+a status checklist is displayed with green checkmarks, and you are prompted
+to either install VPS services or quit.
 EOF
 }
 
@@ -186,22 +188,49 @@ ensure_gh() {
     fi
 }
 
-ensure_npm_tools() {
-    if ! command -v npm >/dev/null 2>&1; then
-        log "npm not available; skipping global npm packages"
+ensure_claude() {
+    if command -v claude >/dev/null 2>&1; then
         return 0
     fi
-    local npm_pkgs=()
-    command -v tsc >/dev/null 2>&1 || npm_pkgs+=("typescript")
-    command -v claude >/dev/null 2>&1 || npm_pkgs+=("@anthropic-ai/claude-code")
-    command -v codex >/dev/null 2>&1 || npm_pkgs+=("@openai/codex")
-    command -v copilot >/dev/null 2>&1 || npm_pkgs+=("@github/copilot")
+    log "installing Claude Code"
+    if curl -fsSL https://claude.ai/install.sh | env CLAUDE_INSTALL_ALLOW_SUDO=1 bash 2>/dev/null; then
+        if [[ -f /root/.local/bin/claude ]]; then
+            cp -f /root/.local/bin/claude /usr/local/bin/claude 2>/dev/null || true
+            chmod 755 /usr/local/bin/claude 2>/dev/null || true
+        fi
+    fi
+    if ! command -v claude >/dev/null 2>&1 && command -v npm >/dev/null 2>&1; then
+        npm install -g --no-audit --no-fund @anthropic-ai/claude-code 2>/dev/null || true
+    fi
+}
 
-    if [[ ${#npm_pkgs[@]} -gt 0 ]]; then
-        log "installing global npm packages: ${npm_pkgs[*]}"
-        npm install -g --no-audit --no-fund "${npm_pkgs[@]}" || {
-            log "WARNING: failed to install some npm packages: ${npm_pkgs[*]}"
-        }
+ensure_codex() {
+    if command -v codex >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        log "installing OpenAI Codex CLI"
+        npm install -g --no-audit --no-fund @openai/codex 2>/dev/null || true
+    fi
+}
+
+ensure_copilot() {
+    if command -v copilot >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        log "installing GitHub Copilot CLI"
+        npm install -g --no-audit --no-fund @github/copilot 2>/dev/null || true
+    fi
+}
+
+ensure_typescript() {
+    if command -v tsc >/dev/null 2>&1; then
+        return 0
+    fi
+    if command -v npm >/dev/null 2>&1; then
+        log "installing TypeScript"
+        npm install -g --no-audit --no-fund typescript 2>/dev/null || true
     fi
 }
 
@@ -211,15 +240,98 @@ ensure_antigravity_cli() {
     fi
     if command -v curl >/dev/null 2>&1; then
         log "installing Antigravity CLI"
-        if curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin; then
-            log "Antigravity CLI installed successfully"
-        else
-            log "WARNING: Antigravity CLI install script failed; install manually if needed"
+        if curl -fsSL https://antigravity.google/cli/install.sh | bash -s -- --dir /usr/local/bin 2>/dev/null; then
+            chmod 755 /usr/local/bin/agy 2>/dev/null || true
+        fi
+        if [[ ! -x /usr/local/bin/agy && -x /root/.local/bin/agy ]]; then
+            cp -f /root/.local/bin/agy /usr/local/bin/agy 2>/dev/null || true
+            chmod 755 /usr/local/bin/agy 2>/dev/null || true
         fi
     fi
 }
 
+ensure_agent_paths() {
+    # Ensure /etc/profile.d script exports /usr/local/bin for all login shells
+    install -d -m 0755 -o root -g root /etc/profile.d
+    cat >/etc/profile.d/vps-shared-path.sh <<'EOF'
+case ":$PATH:" in
+    *":/usr/local/bin:"*) ;;
+    *) export PATH="/usr/local/sbin:/usr/local/bin:$PATH" ;;
+esac
+EOF
+    chmod 0644 /etc/profile.d/vps-shared-path.sh
+
+    # Ensure all agent binaries exist in /usr/local/bin and /usr/bin with world-executable permissions (755)
+    local bin src
+    for bin in claude codex copilot agy antigravity tsc; do
+        src=""
+        if [[ -x "/usr/local/bin/$bin" ]]; then
+            src="/usr/local/bin/$bin"
+        elif [[ -x "/root/.local/bin/$bin" ]]; then
+            src="/root/.local/bin/$bin"
+            cp -f "$src" "/usr/local/bin/$bin" 2>/dev/null || true
+            chmod 755 "/usr/local/bin/$bin" 2>/dev/null || true
+            src="/usr/local/bin/$bin"
+        elif command -v "$bin" >/dev/null 2>&1; then
+            src="$(command -v "$bin")"
+        fi
+        if [[ -n "$src" ]]; then
+            chmod 755 "$src" 2>/dev/null || true
+            if [[ "$src" != "/usr/bin/$bin" ]]; then
+                ln -sf "$src" "/usr/bin/$bin" 2>/dev/null || true
+            fi
+            if [[ "$src" != "/usr/local/bin/$bin" ]]; then
+                ln -sf "$src" "/usr/local/bin/$bin" 2>/dev/null || true
+            fi
+        fi
+    done
+
+    # Ensure antigravity alias exists if agy is present
+    if [[ -x "/usr/bin/agy" && ! -e "/usr/bin/antigravity" ]]; then
+        ln -sf "/usr/bin/agy" "/usr/bin/antigravity" 2>/dev/null || true
+    fi
+
+    # Target non-root users: SUDO_USER and ubuntu
+    local target_users=()
+    if [[ -n "${SUDO_USER:-}" && "${SUDO_USER}" != "root" ]]; then
+        target_users+=("${SUDO_USER}")
+    fi
+    if id -u ubuntu >/dev/null 2>&1; then
+        if [[ " ${target_users[*]:-} " != *" ubuntu "* ]]; then
+            target_users+=("ubuntu")
+        fi
+    fi
+
+    local user user_home
+    for user in "${target_users[@]}"; do
+        user_home="$(getent passwd "$user" | cut -d: -f6 2>/dev/null || true)"
+        if [[ -n "$user_home" && -d "$user_home" ]]; then
+            install -d -m 0755 -o "$user" -g "$user" "$user_home/.local" "$user_home/.local/bin"
+            for bin in claude codex copilot agy antigravity tsc caddy gh; do
+                if [[ -x "/usr/bin/$bin" ]]; then
+                    ln -sf "/usr/bin/$bin" "$user_home/.local/bin/$bin" 2>/dev/null || true
+                elif [[ -x "/usr/local/bin/$bin" ]]; then
+                    ln -sf "/usr/local/bin/$bin" "$user_home/.local/bin/$bin" 2>/dev/null || true
+                fi
+            done
+            chown -h "$user:$user" "$user_home/.local/bin"/* 2>/dev/null || true
+
+            # Also ensure ~/.bashrc has ~/.local/bin and /usr/local/bin
+            if [[ -f "$user_home/.bashrc" ]] && ! grep -q 'vps-shared-path' "$user_home/.bashrc" 2>/dev/null; then
+                printf '\n# VPS Shared Tooling PATH\nexport PATH="$HOME/.local/bin:/usr/local/bin:$PATH"\n' >> "$user_home/.bashrc"
+                chown "$user:$user" "$user_home/.bashrc" 2>/dev/null || true
+            fi
+        fi
+    done
+
+    # Fix world-readable permissions for global npm node_modules
+    if [[ -d /usr/local/lib/node_modules ]]; then
+        chmod -R a+rX /usr/local/lib/node_modules 2>/dev/null || true
+    fi
+}
+
 install_shared_prerequisites() {
+    umask 022
     log "checking base OS packages"
     local base_pkgs=(
         ca-certificates
@@ -250,16 +362,88 @@ install_shared_prerequisites() {
 
     ensure_caddy
     ensure_gh
-    ensure_npm_tools
+    ensure_typescript
+    ensure_claude
+    ensure_codex
+    ensure_copilot
     ensure_antigravity_cli
+    ensure_agent_paths
+}
+
+display_prerequisites_status() {
+    local green="" red="" reset=""
+    if [[ -t 1 ]]; then
+        green=$'\033[32m'
+        red=$'\033[31m'
+        reset=$'\033[0m'
+    fi
+
+    printf '\n=== Shared Prerequisites Status ===\n'
+
+    check_status_item() {
+        local name="$1"
+        local cmd="$2"
+        local check_type="${3:-cmd}"
+
+        local info=""
+        local ok=false
+
+        if [[ "$check_type" == "pkg" ]]; then
+            if package_installed "$cmd"; then
+                ok=true
+                info="installed (deb)"
+            fi
+        else
+            if command -v "$cmd" >/dev/null 2>&1; then
+                ok=true
+                info="$(command -v "$cmd")"
+            elif [[ -x "/usr/local/bin/$cmd" ]]; then
+                ok=true
+                info="/usr/local/bin/$cmd"
+            elif [[ -x "/usr/bin/$cmd" ]]; then
+                ok=true
+                info="/usr/bin/$cmd"
+            fi
+        fi
+
+        if [[ "$ok" == true ]]; then
+            printf '  [%s✓%s] %-20s %s\n' "$green" "$reset" "$name" "$info"
+        else
+            printf '  [%s✗%s] %-20s missing\n' "$red" "$reset" "$name"
+        fi
+    }
+
+    check_status_item "Git" "git"
+    check_status_item "CA Certificates" "ca-certificates" "pkg"
+    check_status_item "Curl" "curl"
+    check_status_item "GnuPG" "gpg"
+    check_status_item "UFW" "ufw"
+    check_status_item "Python 3" "python3"
+    check_status_item "Python" "python"
+    check_status_item "Node.js" "node"
+    check_status_item "NPM" "npm"
+    check_status_item "TypeScript" "tsc"
+    check_status_item "Caddy" "caddy"
+    check_status_item "GitHub CLI" "gh"
+    check_status_item "Claude Code" "claude"
+    check_status_item "OpenAI Codex" "codex"
+    check_status_item "GitHub Copilot" "copilot"
+    check_status_item "Antigravity CLI" "agy"
+
+    printf '===================================\n\n'
 }
 
 main() {
     local prereqs_only=false
+    local check_only=false
     while [[ $# -gt 0 ]]; do
         case "$1" in
             --prereqs|--shared-prereqs|--prerequisites|--shared-prerequisites)
                 prereqs_only=true
+                shift
+                ;;
+            --check|--status)
+                check_only=true
                 shift
                 ;;
             -h|--help)
@@ -273,7 +457,7 @@ main() {
     done
 
     [[ ${EUID} == 0 ]] || fail "run with sudo from your own SSH terminal"
-    if [[ "$prereqs_only" == false ]]; then
+    if [[ "$prereqs_only" == false && "$check_only" == false ]]; then
         [[ -t 1 && -r /dev/tty && -w /dev/tty ]] || fail "run interactively in your own SSH terminal"
     fi
     [[ -r /etc/os-release ]] || fail "Ubuntu is required"
@@ -283,12 +467,23 @@ main() {
     exec 9>/root/.vps-bootstrap.lock
     flock -n 9 || fail "another bootstrap is running"
 
-    log "checking and installing shared prerequisites"
-    install_shared_prerequisites
+    if [[ "$check_only" == true ]]; then
+        display_prerequisites_status
+        exit 0
+    fi
 
     if [[ "$prereqs_only" == true ]]; then
+        log "checking and installing shared prerequisites"
+        install_shared_prerequisites
+        display_prerequisites_status
         log "shared prerequisites installed successfully"
         exit 0
+    fi
+
+    log "checking base packages"
+    if ! command -v git >/dev/null || ! dpkg-query -W -f='${Status}' ca-certificates 2>/dev/null | grep -qx 'install ok installed'; then
+        apt-get update
+        DEBIAN_FRONTEND=noninteractive apt-get install -y git ca-certificates
     fi
 
     install_credential

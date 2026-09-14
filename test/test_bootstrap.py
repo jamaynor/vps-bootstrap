@@ -9,6 +9,7 @@ import time
 import unittest
 
 SCRIPT = Path(__file__).resolve().parents[1] / 'bootstrap.sh'
+CHECK_PREREQS_SCRIPT = Path(__file__).resolve().parents[1] / 'check-prereqs.sh'
 
 class BootstrapTests(unittest.TestCase):
     def setUp(self):
@@ -207,7 +208,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                         sent = True
             else:
                 os.kill(pid, 9)
-                self.fail('launcher timed out')
+                self.fail(f'launcher timed out, output={output!r}')
             _, status = os.waitpid(pid, 0)
             self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode())
         finally:
@@ -315,7 +316,13 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                                     .replace('/etc/os-release', str(os_release))
         stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
                 'apt-get() { exit 97; }\n'
-                'agy() { :; }\n')
+                'curl() { :; }\n'
+                'npm() { :; }\n'
+                'claude() { :; }\n'
+                'codex() { :; }\n'
+                'copilot() { :; }\n'
+                'agy() { :; }\n'
+                'tsc() { :; }\n')
         fixture_script.write_text(stub + content)
 
         for flag in ['--prereqs', '--shared-prereqs', '--prerequisites']:
@@ -325,6 +332,53 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                 self.assertEqual(result.returncode, 0, result.stderr)
                 self.assertIn('shared prerequisites installed successfully', result.stdout)
                 self.assertFalse((host_root / '.secrets').exists())
+
+    def test_check_flag_displays_status_and_exits(self):
+        for flag in ['--check', '--status']:
+            with self.subTest(flag=flag):
+                result = subprocess.run(['bash', str(SCRIPT), flag], text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn('Shared Prerequisites Status', result.stdout)
+
+    def test_check_prereqs_script_displays_status_flag(self):
+        for flag in ['--check', '--status', '-c']:
+            with self.subTest(flag=flag):
+                result = subprocess.run(['bash', str(CHECK_PREREQS_SCRIPT), flag],
+                                        text=True, capture_output=True)
+                self.assertEqual(result.returncode, 0)
+                self.assertIn('VPS Shared Prerequisites Status', result.stdout)
+
+    def test_check_prereqs_script_quit_exits_cleanly(self):
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execv('/bin/bash', ['bash', str(CHECK_PREREQS_SCRIPT)])
+        output = b''
+        sent = False
+        deadline = time.monotonic() + 10
+        try:
+            while time.monotonic() < deadline:
+                if select.select([fd], [], [], .1)[0]:
+                    try:
+                        chunk = os.read(fd, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    output += chunk
+                    if b'Select [' in output and not sent:
+                        if b'3) Quit' in output:
+                            os.write(fd, b'3\n')
+                        else:
+                            os.write(fd, b'2\n')
+                        sent = True
+            else:
+                os.kill(pid, 9)
+                self.fail('check-prereqs prompt timed out')
+            _, status = os.waitpid(pid, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode())
+        finally:
+            os.close(fd)
+        self.assertIn(b'Exiting.', output)
 
 if __name__ == '__main__':
     unittest.main()

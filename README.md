@@ -23,18 +23,31 @@ moving branch, so replace it with a reviewed commit ID for a fixed version.
 
 ## Shared prerequisites
 
-By default, the launcher ensures common VPS prerequisites are installed to prepare the host before configuring credentials and launching service selection:
+To verify prerequisites or install only shared host prerequisites:
+
+- **Prerequisites Status Checker & Launcher (`check-prereqs.sh`)**:
+  Lists all prerequisite items with colored checkmarks (`[✓]` / `[✗]`) and prompts to install VPS services or quit:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/jamaynor/vps-bootstrap/main/check-prereqs.sh | bash
+  ```
+
+  Or locally: `./check-prereqs.sh` (or `./check-prereqs.sh --check` for status only).
+
+- **Install Shared Prerequisites Only (`--prereqs`)**:
+  Installs shared packages and developer agents without configuring GitHub credentials or checking out private repositories:
+
+  ```bash
+  curl -fsSL https://raw.githubusercontent.com/jamaynor/vps-bootstrap/main/bootstrap.sh | sudo bash -s -- --prereqs
+  ```
+
+  Aliases `--shared-prereqs` and `--prerequisites` are also supported.
+
+The shared prerequisites include:
 - System packages: `git`, `ca-certificates`, `curl`, `gnupg`, `ufw`, `python3`, `python3-pip`, `python3-venv`, `python-is-python3`, `nodejs`, `npm`
 - Web server: `caddy`
 - Developer tooling: `gh` (GitHub CLI), `typescript` (`tsc`), `@anthropic-ai/claude-code`, `@openai/codex`, `@github/copilot`, and Antigravity CLI (`agy`)
-
-To install **only** these shared prerequisites without prompting for GitHub credentials, checking out private repositories, or opening the service installer menu:
-
-```bash
-curl -fsSL https://raw.githubusercontent.com/jamaynor/vps-bootstrap/main/bootstrap.sh | sudo bash -s -- --prereqs
-```
-
-Aliases `--shared-prereqs` and `--prerequisites` are also supported. Unlike the full interactive launcher, the `--prereqs` mode does not require an interactive terminal and can be used in automated provisioning workflows.
+- Non-root user PATH: Automatically configures `/usr/local/bin`, `/usr/bin`, `/etc/profile.d/vps-shared-path.sh`, and `~ubuntu/.local/bin` so all coding agents are available on `$PATH` for the `ubuntu` user and all login shells with `0755` permissions.
 
 ## Credential handling
 

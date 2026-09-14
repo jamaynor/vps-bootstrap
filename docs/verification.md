@@ -4,7 +4,7 @@ Local automated validation covers synthetic credential entry through a real
 PTY, retained credentials, helper protocol scope, filesystem protections,
 noninteractive refusal, shared prerequisites installation options, and real
 Git clone/rerun/local-edit preservation.
-Run `bash -n bootstrap.sh` and `python3 -m unittest discover -s test -v`.
+Run `bash -n bootstrap.sh && bash -n check-prereqs.sh` and `python3 -m unittest discover -s test -v`.
 No live host provisioning or real credential access is part of those tests.
 
 ## Fresh Ubuntu smoke test
@@ -13,8 +13,21 @@ Use a disposable Ubuntu VPS with working networking and an operator-owned SSH
 session. Do not run this flow through an agent-connected terminal.
 
 1. Run the entry command from the README using an account with sudo authority
-   (or pass `--prereqs` to install shared host prerequisites only).
-   On bare Ubuntu, base packages and shared prerequisites are installed as needed.
+   (or pass `--prereqs` to install shared host prerequisites only, or run
+   `./check-prereqs.sh` to see the status checklist with green checks and menu).
+   To verify that all shared prerequisite commands and binaries are present in PATH:
+
+   ```bash
+   ./check-prereqs.sh --check
+   ```
+
+   Or via loop:
+
+   ```bash
+   for cmd in git curl gpg ufw python3 python node npm caddy gh tsc claude codex copilot agy; do
+       command -v "$cmd" >/dev/null 2>&1 && echo "✓ $cmd: $(command -v "$cmd")" || echo "✗ $cmd missing"
+   done
+   ```
 2. At the masked prompt, enter a PAT authorized to read the private installer
    repository. Typed characters must not appear on screen.
 3. Confirm that the service-selection menu appears. Stop at the menu if this is
