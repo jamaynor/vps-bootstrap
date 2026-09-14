@@ -119,7 +119,7 @@ prepare_checkout() {
 main() {
     [[ ${EUID} == 0 ]] || fail "run with sudo from your own SSH terminal"
     [[ $# == 0 ]] || fail "this launcher takes no arguments or secret values"
-    [[ -t 0 && -t 1 ]] || fail "run interactively in your own SSH terminal; do not pipe input or output"
+    [[ -t 1 && -r /dev/tty && -w /dev/tty ]] || fail "run interactively in your own SSH terminal"
     [[ -r /etc/os-release ]] || fail "Ubuntu is required"
     . /etc/os-release
     [[ ${ID:-} == ubuntu ]] || fail "Ubuntu is required"
@@ -145,9 +145,9 @@ main() {
     # Keep the checkout lock until installation ends. Only the parent holds it,
     # so service children cannot retain the bootstrap lock after exit.
     env -i HOME=/root USER=root LOGNAME=root PATH="/usr/local/sbin:/usr/local/bin:$PATH" \
-        TERM="${TERM:-xterm}" bash "$CHECKOUT/install.sh" 9>&-
+        TERM="${TERM:-xterm}" bash "$CHECKOUT/install.sh" </dev/tty 9>&-
 }
 
-if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
+if [[ ${#BASH_SOURCE[@]} -eq 0 || ${BASH_SOURCE[0]} == "$0" ]]; then
     main "$@"
 fi

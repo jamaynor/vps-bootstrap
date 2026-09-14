@@ -4,14 +4,14 @@ One-command entry point for native Ubuntu service provisioning with
 [jamaynor/vps-services](https://github.com/jamaynor/vps-services).
 
 Run this **in your own SSH terminal**, on a running Ubuntu VPS with networking
-and root or sudo access. No preinstalled Git, curl, or secrets are required:
+and root or sudo access. No preinstalled Git or secrets are required:
 
 ```bash
-sudo bash -c 'set -e; apt-get update; apt-get install -y ca-certificates curl; d=$(mktemp -d /root/vps-bootstrap.XXXXXX); trap '\''rm -rf -- "$d"'\'' EXIT; curl --proto "=https" --tlsv1.2 -fsSL https://raw.githubusercontent.com/jamaynor/vps-bootstrap/main/bootstrap.sh -o "$d/bootstrap.sh"; bash "$d/bootstrap.sh"'
+curl -fsSL https://raw.githubusercontent.com/jamaynor/vps-bootstrap/main/bootstrap.sh | sudo bash
 ```
 
-The command installs download prerequisites, downloads the launcher into a
-root-only temporary directory, and runs it. Download failure prevents execution.
+*(If `curl` is not preinstalled on a minimal image, install it first: `sudo apt-get update && sudo apt-get install -y curl`)*.
+
 The launcher asks for your GitHub PAT with terminal echo disabled, stores it in
 `/root/.secrets/gh_pat.txt`, fetches the private installer repository into
 `/srv/repos/jamaynor/vps-services`, and opens its service-selection menu.

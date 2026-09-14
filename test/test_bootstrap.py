@@ -230,5 +230,67 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         result = self.run_shell(f'CHECKOUT={checkout}\ncheck_checkout_tree')
         self.assertNotEqual(result.returncode, 0)
 
+    def test_piped_launcher_reaches_menu_without_exposing_pat(self):
+        upstream = self.root / 'upstream'
+        upstream.mkdir()
+        git_env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.root),
+                   'GIT_CONFIG_NOSYSTEM': '1'}
+        def git(*args):
+            subprocess.run(['git', *args], env=git_env, check=True, capture_output=True)
+        git('init', '-b', 'main', str(upstream))
+        lock = self.root / 'root/.vps-bootstrap.lock'
+        (upstream / 'install.sh').write_text(
+            f'#!/bin/bash\nif flock -n {lock} true; then exit 91; fi\n'
+            '[[ $PATH == /usr/local/sbin:/usr/local/bin:* ]] || exit 92\n'
+            'printf "SERVICE_MENU_REACHED\\n"\n')
+        git('-C', str(upstream), 'add', 'install.sh')
+        git('-C', str(upstream), '-c', 'user.name=Test',
+            '-c', 'user.email=test@example.invalid', 'commit', '-m', 'fixture')
+        fixture_script = self.root / 'fixture-bootstrap.sh'
+        host_root = self.root / 'root'
+        host_root.mkdir()
+        os_release = self.root / 'os-release'
+        os_release.write_text('ID=ubuntu\n')
+        stub = 'dpkg-query() { printf "install ok installed\\n"; }\napt-get() { exit 97; }\n'
+        content = SCRIPT.read_text().replace('/root', str(host_root)) \
+                                    .replace('/srv', str(self.root / 'srv')) \
+                                    .replace('/etc/os-release', str(os_release)) \
+                                    .replace('https://github.com/jamaynor/vps-services.git', str(upstream))
+        fixture_script.write_text(stub + content)
+        pid, fd = pty.fork()
+        if pid == 0:
+            os.execv('/bin/bash', ['bash', '-c', f'cat {fixture_script} | bash'])
+        output = b''
+        sent = False
+        deadline = time.monotonic() + 10
+        try:
+            while time.monotonic() < deadline:
+                if select.select([fd], [], [], .1)[0]:
+                    try:
+                        chunk = os.read(fd, 4096)
+                    except OSError:
+                        break
+                    if not chunk:
+                        break
+                    output += chunk
+                    if b'GitHub PAT (hidden;' in output and not sent:
+                        os.write(fd, b'ghp_FAKE_HOST_ONLY\n')
+                        sent = True
+            else:
+                os.kill(pid, 9)
+                self.fail('piped launcher timed out')
+            _, status = os.waitpid(pid, 0)
+            self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode())
+        finally:
+            os.close(fd)
+        self.assertIn(b'SERVICE_MENU_REACHED', output)
+        self.assertNotIn(b'ghp_FAKE_HOST_ONLY', output)
+        secret = host_root / '.secrets/gh_pat.txt'
+        self.assertEqual(secret.read_text(), 'ghp_FAKE_HOST_ONLY\n')
+        self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
+        checkout = self.root / 'srv/repos/jamaynor/vps-services'
+        self.assertEqual(checkout.stat().st_mode & 0o777, 0o755)
+        self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o644)
+
 if __name__ == '__main__':
     unittest.main()
