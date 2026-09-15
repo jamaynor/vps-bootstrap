@@ -1,7 +1,7 @@
 # VPS Bootstrap
 
-One-command entry point for native Ubuntu service provisioning with
-[jamaynor/vps-services](https://github.com/jamaynor/vps-services).
+Prepare Ubuntu prerequisites and install
+[jamaynor/vps-operations](https://github.com/jamaynor/vps-operations).
 
 Run this **in your own SSH terminal**, on a running Ubuntu VPS with networking
 and root or sudo access. No preinstalled Git or secrets are required:
@@ -12,12 +12,16 @@ curl -fsSL https://raw.githubusercontent.com/jamaynor/vps-bootstrap/main/bootstr
 
 *(If `curl` is not preinstalled on a minimal image, install it first: `sudo apt-get update && sudo apt-get install -y curl`)*.
 
-The launcher asks for your GitHub PAT with terminal echo disabled, stores it in
-`/root/.secrets/gh_pat.txt`, fetches the private installer repository into
-`/srv/repos/jamaynor/vps-services`, and opens its service-selection menu.
+After checking and installing shared prerequisites, the launcher asks where to
+install the operations tools. Enter an absolute directory beneath `/root`; no
+private directory name is suggested or hard-coded. It then asks for your GitHub
+PAT with terminal echo disabled (or reuses the retained credential), stores it
+in `/root/.secrets/gh_pat.txt`, and clones `jamaynor/vps-operations` into the chosen
+directory with root-only permissions (`0700`). It prints completion and exits.
+It does not offer further installs or execute any script from the checkout.
 
 The PAT needs read access to the private repositories you intend to install,
-including `jamaynor/vps-services`. Nothing in this public repository contains
+including `jamaynor/vps-operations`. Nothing in this public repository contains
 credentials. Review `bootstrap.sh` before execution if desired; `main` is a
 moving branch, so replace it with a reviewed commit ID for a fixed version.
 
@@ -26,7 +30,7 @@ moving branch, so replace it with a reviewed commit ID for a fixed version.
 To verify prerequisites or install only shared host prerequisites:
 
 - **Prerequisites Status Checker & Launcher (`check-prereqs.sh`)**:
-  Lists all prerequisite items with colored checkmarks (`[✓]` / `[✗]`) and prompts to install VPS services or quit:
+  Lists all prerequisite items with colored checkmarks (`[✓]` / `[✗]`) and offers to run the operations bootstrap or quit:
 
   ```bash
   curl -fsSL https://raw.githubusercontent.com/jamaynor/vps-bootstrap/main/check-prereqs.sh | bash
@@ -82,15 +86,16 @@ not encrypted storage.
 
 Existing checkouts must be root-owned, contain no symlinks or group/world-writable
 paths, use the expected origin, be clean, and be on `main`. Updates are
-fast-forward-only; failures stop before launch. Local edits are never reset,
+fast-forward-only; failures stop bootstrap. Local edits are never reset,
 stashed, or discarded. A partial clone is preserved for operator inspection.
 Concurrent bootstrap runs are refused.
 
-This launcher obtains access and opens the installer. The private repository
-owns application provisioning and individual service prompts. The broader
-requirement to collect every application-specific secret through a masked SSH
-prompt is not implemented by this launcher. It does not run the older
-`bootstrap-part1.sh` / `bootstrap-part2.sh` agent-toolchain workflow.
+Each normal run asks for the operations directory again. Empty, relative, or
+outside-root paths are refused, as are symlinked or writable parents. Existing
+local edits are preserved. The launcher installs the operations tools and stops;
+it does not execute their runbooks or verify account-transition completion.
+Use their setup runbook as a separate next step. Application provisioning stays
+in `jamaynor/vps-services` and is started separately when needed.
 
 ## Verification
 

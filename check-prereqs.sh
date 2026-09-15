@@ -111,7 +111,7 @@ launch_bootstrap() {
 
 prompt_menu() {
     printf 'Next action:\n'
-    printf '  1) Install VPS services\n'
+    printf '  1) Install VPS operations tools\n'
     if [[ $MISSING_COUNT -gt 0 ]]; then
         printf '  2) Install missing prerequisites\n'
         printf '  3) Exit\n\n'
@@ -134,7 +134,7 @@ prompt_menu() {
     if [[ $MISSING_COUNT -gt 0 ]]; then
         case "$choice" in
             1|install|vps|y|Y|yes|YES)
-                printf '[vps-bootstrap] Proceeding with VPS services installation...\n'
+                printf '[vps-bootstrap] Proceeding with VPS operations tools installation...\n'
                 launch_bootstrap
                 ;;
             2|prereqs|missing)
@@ -153,7 +153,7 @@ prompt_menu() {
     else
         case "$choice" in
             1|install|vps|y|Y|yes|YES)
-                printf '[vps-bootstrap] Proceeding with VPS services installation...\n'
+                printf '[vps-bootstrap] Proceeding with VPS operations tools installation...\n'
                 launch_bootstrap
                 ;;
             2|exit|Exit|quit|Quit|q|Q|n|N|no|NO)
@@ -181,7 +181,7 @@ main() {
                 ;;
             -h|--help)
                 printf 'Usage: check-prereqs.sh [options]\n\n'
-                printf 'Checks prerequisites and presents options to install VPS services or quit.\n\n'
+                printf 'Checks prerequisites and presents options to install VPS operations tools or quit.\n\n'
                 printf 'Options:\n'
                 printf '  --check, -c    Display prerequisites checklist and exit\n'
                 printf '  --install      Install missing shared prerequisites\n'

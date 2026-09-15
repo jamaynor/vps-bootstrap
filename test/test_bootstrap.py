@@ -88,6 +88,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
             os.execv('/bin/bash', ['bash', '-x', '-c', self.prefix + 'prompt_pat'])
         output = b''
         sent = False
+        directory_sent = False
         deadline = time.monotonic() + 5
         try:
             while time.monotonic() < deadline:
@@ -99,6 +100,9 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                     if not chunk:
                         break
                     output += chunk
+                    if b'Directory for VPS operations tools' in output and not directory_sent:
+                        os.write(fd, f'{self.root}/root/custom tools\n'.encode())
+                        directory_sent = True
                     if b'GitHub PAT (hidden;' in output and not sent:
                         os.write(fd, value)
                         sent = True
@@ -144,12 +148,12 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         fixture_script.write_text(SCRIPT.read_text().replace('/root', str(self.root / 'root'))
                                   .replace('/srv', str(self.root / 'srv')))
         (self.root / 'root').mkdir()
-        command = f'source {fixture_script}\nREPOSITORY={upstream}\numask 022\nprepare_checkout'
+        command = f'source {fixture_script}\nREPOSITORY={upstream}\nCHECKOUT="{self.root}/root/custom tools"\nprepare_checkout'
         first = subprocess.run(['bash', '-c', command], text=True, capture_output=True)
         self.assertEqual(first.returncode, 0, first.stderr)
-        checkout = self.root / 'srv/repos/jamaynor/vps-services'
-        self.assertEqual(checkout.stat().st_mode & 0o777, 0o755)
-        self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o644)
+        checkout = self.root / 'root/custom tools'
+        self.assertEqual(checkout.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o600)
         second = subprocess.run(['bash', '-c', command], text=True, capture_output=True)
         self.assertEqual(second.returncode, 0, second.stderr)
         (checkout / 'install.sh').write_text('operator edits\n')
@@ -158,7 +162,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         self.assertIn('local changes', dirty.stderr)
         self.assertEqual((checkout / 'install.sh').read_text(), 'operator edits\n')
 
-    def test_full_launcher_reaches_menu_without_exposing_pat(self):
+    def test_full_launcher_installs_operations_and_exits_without_exposing_pat(self):
         upstream = self.root / 'upstream'
         upstream.mkdir()
         git_env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.root),
@@ -186,6 +190,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         # clean environment and exec handoff run in the relocated fixture.
         stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
                 'apt-get() { exit 97; }\n'
+                'install_shared_prerequisites() { :; }\n'
                 'node() { printf "v22.0.0\\n"; }\n'
                 'npm() { :; }\n'
                 'curl() { :; }\n'
@@ -202,6 +207,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
             os.execv('/bin/bash', ['bash', '-c', command])
         output = b''
         sent = False
+        directory_sent = False
         deadline = time.monotonic() + 10
         try:
             while time.monotonic() < deadline:
@@ -213,6 +219,9 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                     if not chunk:
                         break
                     output += chunk
+                    if b'Directory for VPS operations tools' in output and not directory_sent:
+                        os.write(fd, f'{self.root}/root/custom tools\n'.encode())
+                        directory_sent = True
                     if b'GitHub PAT (hidden;' in output and not sent:
                         os.write(fd, b'ghp_FAKE_HOST_ONLY\n')
                         sent = True
@@ -223,14 +232,15 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
             self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode())
         finally:
             os.close(fd)
-        self.assertIn(b'SERVICE_MENU_REACHED', output)
+        self.assertNotIn(b'SERVICE_MENU_REACHED', output)
+        self.assertIn(b'Bootstrap complete.', output)
         self.assertNotIn(b'ghp_FAKE_HOST_ONLY', output)
         secret = host_root / '.secrets/gh_pat.txt'
         self.assertEqual(secret.read_text(), 'ghp_FAKE_HOST_ONLY\n')
         self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
-        checkout = self.root / 'srv/repos/jamaynor/vps-services'
-        self.assertEqual(checkout.stat().st_mode & 0o777, 0o755)
-        self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o644)
+        checkout = self.root / 'root/custom tools'
+        self.assertEqual(checkout.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o600)
         config = (host_root / '.gitconfig').read_text()
         self.assertNotIn('ghp_FAKE_HOST_ONLY', config)
 
@@ -241,7 +251,44 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         result = self.run_shell(f'CHECKOUT={checkout}\ncheck_checkout_tree')
         self.assertNotEqual(result.returncode, 0)
 
-    def test_piped_launcher_reaches_menu_without_exposing_pat(self):
+    def test_checkout_rejects_invalid_destinations_before_git(self):
+        for path in ['', 'relative', '/roor/tools', '/srv/tools', '/root',
+                     '/root/../tmp/tools', '/root/./tools', '/root//tools',
+                     '/root/tools/', '/root/tools\nextra']:
+            with self.subTest(path=path):
+                import shlex
+                result = self.run_shell(
+                    f'CHECKOUT={shlex.quote(path)}\n'
+                    'trusted_git() { echo UNEXPECTED_GIT; exit 99; }\n'
+                    'prepare_checkout')
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('UNEXPECTED_GIT', result.stdout)
+
+    def test_checkout_rejects_symlink_or_writable_parent(self):
+        host_root = self.root / 'root'
+        host_root.mkdir()
+        target = self.root / 'target'
+        target.mkdir()
+        parent = host_root / 'unsafe'
+        script = self.root / 'fixture.sh'
+        script.write_text(SCRIPT.read_text().replace('/root', str(host_root)))
+        for symlink in [True, False]:
+            with self.subTest(symlink=symlink):
+                if symlink:
+                    parent.symlink_to(target, target_is_directory=True)
+                else:
+                    parent.unlink()
+                    parent.mkdir(mode=0o777)
+                    parent.chmod(0o777)
+                result = subprocess.run(['bash', '-c',
+                    f'source {script}\nCHECKOUT={parent}/tools\n'
+                    'trusted_git() { echo UNEXPECTED_GIT; exit 99; }\nprepare_checkout'],
+                    text=True, capture_output=True)
+                self.assertNotEqual(result.returncode, 0)
+                self.assertNotIn('UNEXPECTED_GIT', result.stdout)
+                self.assertFalse((target / 'tools').exists())
+
+    def test_piped_launcher_installs_operations_and_exits_without_exposing_pat(self):
         upstream = self.root / 'upstream'
         upstream.mkdir()
         git_env = {'PATH': '/usr/bin:/bin', 'HOME': str(self.root),
@@ -264,6 +311,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         os_release.write_text('ID=ubuntu\n')
         stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
                 'apt-get() { exit 97; }\n'
+                'install_shared_prerequisites() { :; }\n'
                 'node() { printf "v22.0.0\\n"; }\n'
                 'npm() { :; }\n'
                 'curl() { :; }\n'
@@ -277,13 +325,14 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
         content = SCRIPT.read_text().replace('/root', str(host_root)) \
                                     .replace('/srv', str(self.root / 'srv')) \
                                     .replace('/etc/os-release', str(os_release)) \
-                                    .replace('https://github.com/jamaynor/vps-services.git', str(upstream))
-        fixture_script.write_text(stub + content)
+                                    .replace('https://github.com/jamaynor/vps-operations.git', str(upstream))
+        fixture_script.write_text(content.replace('if [[ ${#BASH_SOURCE[@]}', stub + '\nif [[ ${#BASH_SOURCE[@]}'))
         pid, fd = pty.fork()
         if pid == 0:
             os.execv('/bin/bash', ['bash', '-c', f'cat {fixture_script} | bash'])
         output = b''
         sent = False
+        directory_sent = False
         deadline = time.monotonic() + 10
         try:
             while time.monotonic() < deadline:
@@ -295,6 +344,9 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                     if not chunk:
                         break
                     output += chunk
+                    if b'Directory for VPS operations tools' in output and not directory_sent:
+                        os.write(fd, f'{self.root}/root/custom tools\n'.encode())
+                        directory_sent = True
                     if b'GitHub PAT (hidden;' in output and not sent:
                         os.write(fd, b'ghp_FAKE_HOST_ONLY\n')
                         sent = True
@@ -305,14 +357,15 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
             self.assertEqual(os.waitstatus_to_exitcode(status), 0, output.decode())
         finally:
             os.close(fd)
-        self.assertIn(b'SERVICE_MENU_REACHED', output)
+        self.assertNotIn(b'SERVICE_MENU_REACHED', output)
+        self.assertIn(b'Bootstrap complete.', output)
         self.assertNotIn(b'ghp_FAKE_HOST_ONLY', output)
         secret = host_root / '.secrets/gh_pat.txt'
         self.assertEqual(secret.read_text(), 'ghp_FAKE_HOST_ONLY\n')
         self.assertEqual(secret.stat().st_mode & 0o777, 0o600)
-        checkout = self.root / 'srv/repos/jamaynor/vps-services'
-        self.assertEqual(checkout.stat().st_mode & 0o777, 0o755)
-        self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o644)
+        checkout = self.root / 'root/custom tools'
+        self.assertEqual(checkout.stat().st_mode & 0o777, 0o700)
+        self.assertEqual((checkout / 'install.sh').stat().st_mode & 0o777, 0o600)
 
     def test_help_flag_displays_usage(self):
         for flag in ['-h', '--help']:
@@ -337,6 +390,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                                     .replace('/etc/os-release', str(os_release))
         stub = ('dpkg-query() { printf "install ok installed\\n"; }\n'
                 'apt-get() { exit 97; }\n'
+                'install_shared_prerequisites() { :; }\n'
                 'node() { printf "v22.0.0\\n"; }\n'
                 'npm() { :; }\n'
                 'curl() { :; }\n'
@@ -345,7 +399,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
                 'copilot() { :; }\n'
                 'agy() { :; }\n'
                 'tsc() { :; }\n')
-        fixture_script.write_text(stub + content)
+        fixture_script.write_text(content.replace('if [[ ${#BASH_SOURCE[@]}', stub + '\nif [[ ${#BASH_SOURCE[@]}'))
 
         for flag in ['--prereqs', '--shared-prereqs', '--prerequisites']:
             with self.subTest(flag=flag):
@@ -376,6 +430,7 @@ CREDENTIAL_FILE=$SECRET_DIR/git-credential-vps
             os.execv('/bin/bash', ['bash', str(CHECK_PREREQS_SCRIPT)])
         output = b''
         sent = False
+        directory_sent = False
         deadline = time.monotonic() + 10
         try:
             while time.monotonic() < deadline:

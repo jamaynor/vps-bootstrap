@@ -7,8 +7,8 @@ export PATH=/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin
 SECRET_DIR=/root/.secrets
 SECRET_FILE=${SECRET_DIR}/gh_pat.txt
 CREDENTIAL_FILE=${SECRET_DIR}/git-credential-vps
-CHECKOUT=/srv/repos/jamaynor/vps-services
-REPOSITORY=https://github.com/jamaynor/vps-services.git
+CHECKOUT=
+REPOSITORY=https://github.com/jamaynor/vps-operations.git
 
 log() { printf '[vps-bootstrap] %s\n' "$*"; }
 fail() { log "ERROR: $*" >&2; exit 1; }
@@ -94,14 +94,40 @@ check_checkout_tree() {
     [[ -d "$CHECKOUT/.git" && ! -L "$CHECKOUT/.git" ]] || fail "expected a standalone Git checkout"
 }
 
+validate_checkout_path() {
+    [[ "$CHECKOUT" == /root/* && "$CHECKOUT" != *$'\n'* && "$CHECKOUT" != *$'\r'* ]] ||
+        fail "choose an absolute directory beneath /root"
+    local component
+    local -a components
+    IFS=/ read -r -a components <<< "$CHECKOUT"
+    for component in "${components[@]:1}"; do
+        [[ -n "$component" && "$component" != . && "$component" != .. ]] ||
+            fail "directory must not contain empty, dot, or parent components"
+    done
+    [[ "$CHECKOUT" != */ ]] || fail "omit the trailing slash"
+}
+
+prompt_checkout() {
+    printf 'Directory for VPS operations tools (absolute path beneath /root): ' >/dev/tty
+    IFS= read -r CHECKOUT </dev/tty || fail "directory entry cancelled"
+    validate_checkout_path
+}
+
 prepare_checkout() {
-    local directory
-    for directory in /srv /srv/repos /srv/repos/jamaynor; do
+    validate_checkout_path
+    umask 077
+    local directory=/root component relative
+    local -a parents
+    relative=${CHECKOUT#/root/}
+    IFS=/ read -r -a parents <<< "$relative"
+    # Inspect each parent before traversing it; never follow an operator-supplied symlink.
+    for component in "" "${parents[@]:0:${#parents[@]}-1}"; do
+        [[ -z "$component" ]] || directory+="/$component"
         [[ ! -L "$directory" ]] || fail "source parent must not be a symlink"
         if [[ -e "$directory" ]]; then
             [[ -d "$directory" && $(stat -c %u "$directory") == 0 && -z $(find "$directory" -maxdepth 0 -perm /022 -print) ]] || fail "source parent must be root-owned and not group/world writable"
         else
-            install -d -m 755 -o root -g root "$directory"
+            install -d -m 700 -o root -g root "$directory"
         fi
     done
     if [[ -e "$CHECKOUT" || -L "$CHECKOUT" ]]; then
@@ -115,14 +141,14 @@ prepare_checkout() {
         trusted_git clone --branch main "$REPOSITORY" "$CHECKOUT" || fail "clone failed; check GitHub access and any partial checkout before rerunning"
     fi
     check_checkout_tree
+    chmod 0700 "$CHECKOUT"
 }
 
 usage() {
     cat <<'EOF'
 Usage: bootstrap.sh [options]
 
-One-command entry point for native Ubuntu service provisioning with
-jamaynor/vps-services.
+Prepare Ubuntu prerequisites and install jamaynor/vps-operations.
 
 Options:
   --prereqs, --shared-prereqs, --prerequisites
@@ -133,8 +159,8 @@ Options:
       Show this help message.
 
 When run without options, shared prerequisites are checked and installed,
-a status checklist is displayed with green checkmarks, and you are prompted
-to either install VPS services or quit.
+a status checklist is displayed, and you choose a root-only operations
+checkout directory beneath /root. Bootstrap installs the tools and exits.
 EOF
 }
 
@@ -554,21 +580,17 @@ main() {
         exit 0
     fi
 
+    prompt_checkout
     install_credential
-    # Source checkouts and installer output must remain readable build inputs.
-    umask 022
-    log "fetching the installer repository"
+    umask 077
+    log "fetching the operations repository"
     prepare_checkout
     # Scope persistence to HTTPS GitHub requests; helper additionally limits owner to jamaynor.
     env -i HOME=/root PATH="$PATH" git config --global --replace-all credential.https://github.com.helper ''
     env -i HOME=/root PATH="$PATH" git config --global --add credential.https://github.com.helper "$CREDENTIAL_FILE"
     env -i HOME=/root PATH="$PATH" git config --global credential.https://github.com.useHttpPath true
-    [[ -f "$CHECKOUT/install.sh" ]] || fail "service installer is missing"
-    log "opening service selection"
-    # Keep the checkout lock until installation ends. Only the parent holds it,
-    # so service children cannot retain the bootstrap lock after exit.
-    env -i HOME=/root USER=root LOGNAME=root PATH="/usr/local/sbin:/usr/local/bin:$PATH" \
-        TERM="${TERM:-xterm}" bash "$CHECKOUT/install.sh" </dev/tty 9>&-
+    log "VPS operations tools installed. Bootstrap complete."
+    return 0
 }
 
 if [[ ${#BASH_SOURCE[@]} -eq 0 || ${BASH_SOURCE[0]} == "$0" ]]; then
